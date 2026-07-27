@@ -31,6 +31,11 @@ int ble_store_config_read(int obj_type, const union ble_store_key *key,
                           union ble_store_value *value);
 int ble_store_config_write(int obj_type, const union ble_store_value *val);
 int ble_store_config_delete(int obj_type, const union ble_store_key *key);
+void ble_store_config_init(void);
+int ble_store_config_load_from_file(void);
+void ble_store_config_pvcy_repopulate(void);
+int ble_store_config_save_to_file(void);
+int ble_store_config_read_num_peer_secs(void);
 
 #ifdef __cplusplus
 }

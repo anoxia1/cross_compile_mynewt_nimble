@@ -18,6 +18,7 @@
  */
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "sysinit/sysinit.h"
@@ -26,6 +27,14 @@
 #include "os/util.h"
 #include "store/config/ble_store_config.h"
 #include "ble_store_config_priv.h"
+
+#if MYNEWT_VAL(BLE_STORE_PERSIST_FILE)
+/* Forward declarations for file-based persistence */
+int ble_store_config_save_to_file(void);
+int ble_store_config_load_from_file(void);
+#endif
+/* From ble_hs_pvcy.c (no public header) */
+int ble_hs_pvcy_add_entry(const uint8_t *addr, uint8_t addr_type, const uint8_t *irk);
 
 #if MYNEWT_VAL(BLE_STORE_MAX_BONDS)
 struct ble_store_value_sec
@@ -508,19 +517,24 @@ ble_store_config_write(int obj_type, const union ble_store_value *val)
     switch (obj_type) {
     case BLE_STORE_OBJ_TYPE_PEER_SEC:
         rc = ble_store_config_write_peer_sec(&val->sec);
-        return rc;
+        break;
 
     case BLE_STORE_OBJ_TYPE_OUR_SEC:
         rc = ble_store_config_write_our_sec(&val->sec);
-        return rc;
+        break;
 
     case BLE_STORE_OBJ_TYPE_CCCD:
         rc = ble_store_config_write_cccd(&val->cccd);
-        return rc;
+        break;
 
     default:
         return BLE_HS_ENOTSUP;
     }
+
+    if (rc == 0) {
+        ble_store_config_save_to_file();
+    }
+    return rc;
 }
 
 int
@@ -562,4 +576,128 @@ ble_store_config_init(void)
     ble_store_config_num_cccds = 0;
 
     ble_store_config_conf_init();
+
+#if MYNEWT_VAL(BLE_STORE_PERSIST_FILE)
+    ble_store_config_load_from_file();
+#endif
 }
+
+#if MYNEWT_VAL(BLE_STORE_PERSIST_FILE)
+/*
+ * File-based persistence for Linux (no Mynewt config backend).
+ * Written once at connection teardown, loaded at startup before NimBLE init.
+ */
+#define BLE_STORE_CONFIG_FILE_PATH   MYNEWT_VAL(BLE_STORE_PERSIST_FILE_PATH)
+#define BOND_FILE_MAGIC              0x4E424C45  /* "NBLE" */
+#define BOND_FILE_VERSION            1
+
+/**
+ * @brief 绑定文件二进制头部
+ */
+typedef struct {
+    uint32_t magic;         /**< 魔数 0x4E424C45 ("NBLE") */
+    uint32_t version;       /**< 格式版本，当前为 1 */
+    uint32_t num_our_secs;  /**< our_sec 条目数 */
+    uint32_t num_peer_secs; /**< peer_sec 条目数 */
+    uint32_t num_cccds;     /**< cccd 条目数 */
+    uint32_t reserved[3];   /**< 保留字段 (未来扩展) */
+} bond_file_header_t;
+
+int
+ble_store_config_save_to_file(void)
+{
+    bond_file_header_t hdr;
+    FILE *f;
+
+    f = fopen(BLE_STORE_CONFIG_FILE_PATH, "wb");
+    if (f == NULL) {
+        return -1;
+    }
+
+    hdr.magic         = BOND_FILE_MAGIC;
+    hdr.version       = BOND_FILE_VERSION;
+    hdr.num_our_secs  = ble_store_config_num_our_secs;
+    hdr.num_peer_secs = ble_store_config_num_peer_secs;
+    hdr.num_cccds     = ble_store_config_num_cccds;
+    fwrite(&hdr, sizeof(hdr), 1, f);
+
+#if MYNEWT_VAL(BLE_STORE_MAX_BONDS)
+    fwrite(ble_store_config_our_secs,  sizeof(*ble_store_config_our_secs),  hdr.num_our_secs,  f);
+    fwrite(ble_store_config_peer_secs, sizeof(*ble_store_config_peer_secs), hdr.num_peer_secs, f);
+#endif
+#if MYNEWT_VAL(BLE_STORE_MAX_CCCDS)
+    fwrite(ble_store_config_cccds, sizeof(*ble_store_config_cccds), hdr.num_cccds, f);
+#endif
+
+    fclose(f);
+    fprintf(stderr, "[STORE] saved %u our, %u peer, %u cccd\n",
+            hdr.num_our_secs, hdr.num_peer_secs, hdr.num_cccds);
+    return 0;
+}
+
+int
+ble_store_config_load_from_file(void)
+{
+    bond_file_header_t hdr;
+    FILE *f;
+
+    f = fopen(BLE_STORE_CONFIG_FILE_PATH, "rb");
+    if (f == NULL) {
+        return -1;
+    }
+
+    if (fread(&hdr, sizeof(hdr), 1, f) != 1 || hdr.magic != BOND_FILE_MAGIC || hdr.version != BOND_FILE_VERSION) {
+        fclose(f);
+        return -1;
+    }
+
+#if MYNEWT_VAL(BLE_STORE_MAX_BONDS)
+    if (hdr.num_our_secs  > MYNEWT_VAL(BLE_STORE_MAX_BONDS) ||
+        hdr.num_peer_secs > MYNEWT_VAL(BLE_STORE_MAX_BONDS)) {
+        fclose(f);
+        return -1;
+    }
+    ble_store_config_num_our_secs  = hdr.num_our_secs;
+    ble_store_config_num_peer_secs = hdr.num_peer_secs;
+    fread(ble_store_config_our_secs,  sizeof(*ble_store_config_our_secs),  hdr.num_our_secs,  f);
+    fread(ble_store_config_peer_secs, sizeof(*ble_store_config_peer_secs), hdr.num_peer_secs, f);
+#endif
+
+#if MYNEWT_VAL(BLE_STORE_MAX_CCCDS)
+    if (hdr.num_cccds > MYNEWT_VAL(BLE_STORE_MAX_CCCDS)) {
+        fclose(f);
+        return -1;
+    }
+    ble_store_config_num_cccds = hdr.num_cccds;
+    fread(ble_store_config_cccds, sizeof(*ble_store_config_cccds), hdr.num_cccds, f);
+#endif
+
+    fclose(f);
+    fprintf(stderr, "[STORE] loaded %u our, %u peer, %u cccd\n",
+            hdr.num_our_secs, hdr.num_peer_secs, hdr.num_cccds);
+    return 0;
+}
+
+int
+ble_store_config_read_num_peer_secs(void)
+{
+    return ble_store_config_num_peer_secs;
+}
+
+/*
+ * Re-populate the privacy resolving list from stored peer bonds.
+ * Must be called AFTER NimBLE host is running (e.g. in sync_cb).
+ */
+void ble_store_config_pvcy_repopulate(void)
+{
+    for (int i = 0; i < ble_store_config_num_peer_secs; i++) {
+        ble_hs_pvcy_add_entry(ble_store_config_peer_secs[i].peer_addr.val,
+                              ble_store_config_peer_secs[i].peer_addr.type,
+                              ble_store_config_peer_secs[i].irk);
+    }
+}
+#else
+/* Stubs when persistence is disabled */
+int ble_store_config_load_from_file(void) { return -1; }
+void ble_store_config_pvcy_repopulate(void) {}
+#endif /* BLE_STORE_PERSIST_FILE */

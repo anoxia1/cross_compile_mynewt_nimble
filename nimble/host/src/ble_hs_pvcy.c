@@ -91,7 +91,7 @@ ble_hs_pvcy_remove_entry(uint8_t addr_type, const uint8_t *addr)
     return rc;
 }
 
-static int
+int
 ble_hs_pvcy_clear_entries(void)
 {
     return ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE,
