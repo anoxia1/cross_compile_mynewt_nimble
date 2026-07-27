@@ -43,11 +43,13 @@ MBEDTLS_SRC_DIR  := $(abspath $(NIMBLE_ROOT)/ext/mbedtls)
 MBEDTLS_BUILD_DIR := $(OUTPUT_ROOT)/mbedtls_build
 MBEDTLS_LIB_DIR   := $(abspath $(OUTPUT_ROOT)/mbedtls_lib)
 
-# Mbed TLS 静态库目标
+# Mbed TLS 静态库目标 + stamp 防止 -j 竞态
+#   (多目标规则在 make -j 下会为每个 .a 独立触发 recipe，并行踩踏)
 MBEDTLS_LIBS := \
     $(MBEDTLS_LIB_DIR)/lib/libmbedcrypto.a \
     $(MBEDTLS_LIB_DIR)/lib/libmbedx509.a   \
     $(MBEDTLS_LIB_DIR)/lib/libmbedtls.a
+MBEDTLS_DONE_STAMP := $(MBEDTLS_LIB_DIR)/.mbedtls_built
 
 NULL :=
 
@@ -124,7 +126,7 @@ LIB_TARGET := $(LIB_DIR)/libnimble.a
 # ------------------------------------------------------------------
 # 12. 编译入口（先拷贝头文件，再编译 NimBLE）
 # ------------------------------------------------------------------
-all: prepare $(MBEDTLS_LIBS) install_headers $(LIB_TARGET)
+all: prepare $(MBEDTLS_DONE_STAMP) install_headers $(LIB_TARGET)
 	@echo "=== 所有构建完成 ==="
 	@echo "静态库路径: $(LIB_TARGET)"
 	@echo "头文件路径: $(INCLUDE_DIR)"
@@ -141,7 +143,7 @@ prepare:
 	@echo "已创建输出目录: $(OUTPUT_ROOT)"
 
 # ------------------------------------------------------------------
-# 14. Mbed TLS 构建规则（配置与编译分离，支持并行 make -j）
+# 14. Mbed TLS 构建规则（stamp 文件防止 make -j 竞态）
 # ------------------------------------------------------------------
 MBEDTLS_CONFIGURE_MARKER := $(MBEDTLS_BUILD_DIR)/.cmake_done
 
@@ -160,13 +162,17 @@ $(MBEDTLS_CONFIGURE_MARKER): | prepare
 	    -DCMAKE_INSTALL_PREFIX=$(MBEDTLS_LIB_DIR)
 	@touch $@
 
-$(MBEDTLS_LIBS): $(MBEDTLS_CONFIGURE_MARKER)
+$(MBEDTLS_DONE_STAMP): $(MBEDTLS_CONFIGURE_MARKER)
 	@echo "=== 构建 Mbed TLS (RK3588) ==="
 	cd $(MBEDTLS_BUILD_DIR) && $(MAKE) -j$(shell nproc)
 	cd $(MBEDTLS_BUILD_DIR) && $(MAKE) install
+	@touch $@
 	@echo "=== Mbed TLS 构建完成 ==="
 
-mbedtls: $(MBEDTLS_LIBS)
+$(MBEDTLS_LIBS): $(MBEDTLS_DONE_STAMP)
+	@true
+
+mbedtls: $(MBEDTLS_DONE_STAMP)
 
 # ------------------------------------------------------------------
 # 15. 清理规则（删除整个输出目录）
@@ -174,6 +180,7 @@ mbedtls: $(MBEDTLS_LIBS)
 clean:
 	rm -rf $(OUTPUT_ROOT)
 	rm -rf $(MBEDTLS_BUILD_DIR)
+	rm -f $(MBEDTLS_DONE_STAMP)
 	@echo "=== 清理完成 ==="
 
 # ------------------------------------------------------------------
