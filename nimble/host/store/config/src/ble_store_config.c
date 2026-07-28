@@ -630,8 +630,8 @@ ble_store_config_save_to_file(void)
 #endif
 
     fclose(f);
-    fprintf(stderr, "[STORE] saved %u our, %u peer, %u cccd\n",
-            hdr.num_our_secs, hdr.num_peer_secs, hdr.num_cccds);
+    BLE_HS_LOG(DEBUG, "saved %u our, %u peer, %u cccd.", hdr.num_our_secs, hdr.num_peer_secs, hdr.num_cccds);
+
     return 0;
 }
 
@@ -673,8 +673,7 @@ ble_store_config_load_from_file(void)
 #endif
 
     fclose(f);
-    fprintf(stderr, "[STORE] loaded %u our, %u peer, %u cccd\n",
-            hdr.num_our_secs, hdr.num_peer_secs, hdr.num_cccds);
+    BLE_HS_LOG(DEBUG, "loaded %u our, %u peer, %u cccd.", hdr.num_our_secs, hdr.num_peer_secs, hdr.num_cccds);
     return 0;
 }
 

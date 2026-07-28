@@ -164,7 +164,7 @@ $(MBEDTLS_CONFIGURE_MARKER): | prepare
 
 $(MBEDTLS_DONE_STAMP): $(MBEDTLS_CONFIGURE_MARKER)
 	@echo "=== 构建 Mbed TLS (RK3588) ==="
-	cd $(MBEDTLS_BUILD_DIR) && $(MAKE) -j$(shell nproc)
+	cd $(MBEDTLS_BUILD_DIR) && $(MAKE)
 	cd $(MBEDTLS_BUILD_DIR) && $(MAKE) install
 	@touch $@
 	@echo "=== Mbed TLS 构建完成 ==="
