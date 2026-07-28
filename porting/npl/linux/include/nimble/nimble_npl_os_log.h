@@ -23,9 +23,14 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-/* Example on how to use macro to generate module logging functions */
+/* Weak log functions — application can override with strong symbols at link time.
+ *   Default: vprintf to stderr, no level filtering.
+ *   Override: Smart_light's nimble_log_bridge.c redirects to priv_logger with
+ *             unified timestamp/level/TID formatting and level control.
+ */
 #define BLE_NPL_LOG_IMPL(lvl)                                                 \
-    static inline void _BLE_NPL_LOG_CAT(                                      \
+    __attribute__((weak, format(printf, 1, 2)))                               \
+    void _BLE_NPL_LOG_CAT(                                                    \
         BLE_NPL_LOG_MODULE, _BLE_NPL_LOG_CAT(_, lvl))(const char *fmt, ...)   \
     {                                                                         \
         va_list args;                                                         \
